@@ -1,0 +1,6 @@
+_build
+_opam
+*input.txt
+
+# OSx
+.DS_Store
