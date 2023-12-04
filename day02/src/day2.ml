@@ -109,5 +109,20 @@ module Part1 = struct
 end
 
 module Part2 = struct
-  let run _ = failwith "unimplemented"
+  let power game =
+    let r, g, b =
+      game
+      |> Game.rolls
+      |> List.fold_left
+           (fun (r, g, b) roll ->
+             let totals = Totals.of_list roll in
+             ( Int.max r (Totals.get Color.Red totals),
+               Int.max g (Totals.get Color.Green totals),
+               Int.max b (Totals.get Color.Blue totals) ))
+           (0, 0, 0)
+    in
+    r * g * b
+
+  let run : Input.t -> int =
+   fun games -> games |> Seq.map power |> Seq.fold_left ( + ) 0
 end
