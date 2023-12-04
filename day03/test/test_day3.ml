@@ -16,7 +16,11 @@ let test_part1 () =
 
   Alcotest.(check int) "sum of parts" expected actual
 
-let test_part2 () = ()
+let test_part2 () =
+  let expected = 467835
+  and actual = Day3.Part2.run (Day3.Input.of_string raw_input) in
+
+  Alcotest.(check int) "sum of gear ratios" expected actual
 
 let () =
   let open Alcotest in

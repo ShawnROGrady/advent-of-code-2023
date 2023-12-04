@@ -1,5 +1,3 @@
-[@@@warning "-69"]
-
 module Point = struct
   type t = { x : int; y : int }
 
@@ -23,6 +21,8 @@ module Point = struct
 end
 
 module PointSet = Set.Make (Point)
+module IntSet = Set.Make (Int)
+module PointMap = Map.Make (Point)
 
 module Part = struct
   type t = { points : PointSet.t; value : int }
@@ -33,6 +33,8 @@ end
 
 module Symbol = struct
   type t = { pos : Point.t; value : char }
+
+  let is_gear sym = Char.compare '*' sym.value = 0
 
   let adjacent_points (sym : t) : PointSet.t =
     PointSet.of_seq @@ Point.adjacent sym.pos
@@ -133,5 +135,36 @@ module Part1 = struct
 end
 
 module Part2 = struct
-  let run _ = failwith "unimplemented"
+  let parts_by_pos scheme =
+    scheme
+    |> Schematic.parts
+    |> Seq.fold_left
+         (fun acc part ->
+           acc
+           |> PointMap.add_seq
+                (part
+                |> Part.points
+                |> PointSet.to_seq
+                |> Seq.map (fun point -> (point, Part.value part))))
+         PointMap.empty
+
+  let adjacent_parts parts sym =
+    sym
+    |> Symbol.adjacent_points
+    |> PointSet.to_seq
+    |> Seq.filter_map (fun point -> PointMap.find_opt point parts)
+    |> IntSet.of_seq
+
+  let run : Input.t -> int =
+   fun lines ->
+    let scheme = SchematicParser.parse lines in
+    let gears = scheme |> Schematic.symbols |> Seq.filter Symbol.is_gear
+    and parts = parts_by_pos scheme in
+
+    gears
+    |> Seq.filter_map (fun gear ->
+           match IntSet.elements (adjacent_parts parts gear) with
+           | [ x; y ] -> Some (x * y)
+           | _ -> None)
+    |> Seq.fold_left ( + ) 0
 end
