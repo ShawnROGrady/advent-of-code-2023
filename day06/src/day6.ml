@@ -1,5 +1,5 @@
 module Race = struct
-  type t = { time : int; distance : int }
+  type t = { time : float; distance : float }
 
   let make ~time ~distance = { time; distance }
   let time race = race.time
@@ -21,7 +21,7 @@ module Input = struct
                (List.length other)
     in
 
-    to_parse |> Str.split sep |> List.map int_of_string
+    to_parse |> Str.split sep |> List.map float_of_string
 
   let parse_lines = function
     | [ times_line; dists_line ] ->
@@ -43,21 +43,33 @@ let quadratic_roots a b c =
   in
   (plus /. (2. *. a), minus /. (2. *. a))
 
-module Part1 = struct
-  let ways_to_win race =
-    let roots =
-      quadratic_roots Float.minus_one
-        (Float.of_int @@ Race.time race)
-        (Float.neg @@ Float.of_int @@ Race.distance race)
-    in
-    let min_hold = Float.floor @@ fst roots
-    and max_hold = Float.ceil @@ snd roots in
-    Int.pred @@ Float.to_int (max_hold -. min_hold)
+let ways_to_win race =
+  let roots =
+    quadratic_roots Float.minus_one (Race.time race)
+      (Float.neg @@ Race.distance race)
+  in
+  let min_hold = Float.floor @@ fst roots
+  and max_hold = Float.ceil @@ snd roots in
+  Int.pred @@ Float.to_int (max_hold -. min_hold)
 
+module Part1 = struct
   let run : Input.t -> int =
    fun races -> races |> List.map ways_to_win |> List.fold_left ( * ) 1
 end
 
 module Part2 = struct
-  let run _ = failwith "unimplemented"
+  let join_races races =
+    let ( ^. ) a b = (Int.to_string @@ Float.to_int a) ^ b in
+
+    let time_s, dist_s =
+      List.fold_right
+        (fun race (t, d) -> (Race.time race ^. t, Race.distance race ^. d))
+        races ("", "")
+    in
+
+    let time = float_of_string time_s and distance = float_of_string dist_s in
+
+    Race.make ~time ~distance
+
+  let run : Input.t -> int = fun races -> races |> join_races |> ways_to_win
 end

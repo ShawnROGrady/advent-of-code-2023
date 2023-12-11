@@ -7,7 +7,11 @@ let test_part1 () =
 
   Alcotest.(check int) "product of ways" expected actual
 
-let test_part2 () = ()
+let test_part2 () =
+  let expected = 71503
+  and actual = Day6.Part2.run (Day6.Input.of_string raw_input) in
+
+  Alcotest.(check int) "ways to win" expected actual
 
 let () =
   let open Alcotest in
