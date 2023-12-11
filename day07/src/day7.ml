@@ -1,5 +1,3 @@
-[@@@warning "-32"]
-
 module Rank = struct
   type t =
     | FiveOfAKind
@@ -24,10 +22,10 @@ end
 
 module Card = struct
   type t =
-    | Ace
-    | King
-    | Queen
-    | Jack
+    | A
+    | K
+    | Q
+    | J
     | Ten
     | Nine
     | Eight
@@ -39,10 +37,10 @@ module Card = struct
     | Two
 
   let to_int = function
-    | Ace -> 14
-    | King -> 13
-    | Queen -> 12
-    | Jack -> 11
+    | A -> 14
+    | K -> 13
+    | Q -> 12
+    | J -> 11
     | Ten -> 10
     | Nine -> 9
     | Eight -> 8
@@ -56,10 +54,10 @@ module Card = struct
   let compare a b = Int.compare (to_int a) (to_int b)
 
   let of_char = function
-    | 'A' -> Ace
-    | 'K' -> King
-    | 'Q' -> Queen
-    | 'J' -> Jack
+    | 'A' -> A
+    | 'K' -> K
+    | 'Q' -> Q
+    | 'J' -> J
     | 'T' -> Ten
     | '9' -> Nine
     | '8' -> Eight
@@ -70,21 +68,6 @@ module Card = struct
     | '3' -> Three
     | '2' -> Two
     | other -> failwith @@ Printf.sprintf "unknown card: '%c'" other
-
-  let to_char = function
-    | Ace -> 'A'
-    | King -> 'K'
-    | Queen -> 'Q'
-    | Jack -> 'J'
-    | Ten -> 'T'
-    | Nine -> '9'
-    | Eight -> '8'
-    | Seven -> '7'
-    | Six -> '6'
-    | Five -> '5'
-    | Four -> '4'
-    | Three -> '3'
-    | Two -> '2'
 end
 
 module Hand = struct
@@ -138,10 +121,10 @@ module Totals = struct
     List.fold_left (fun m card -> add card m) empty
 
   let to_seq : t -> (Card.t * int) Seq.t = CardMap.to_seq
-end
 
-let string_of_cards cards =
-  cards |> List.to_seq |> Seq.map Card.to_char |> String.of_seq
+  let get (card : Card.t) (totals : t) : int =
+    totals |> CardMap.find_opt card |> Option.value ~default:0
+end
 
 module Part1 = struct
   let rank_of_cards (cards : Card.t list) : Rank.t =
@@ -164,8 +147,6 @@ module Part1 = struct
     | (_, 2) :: (_, 2) :: _ -> Rank.TwoPair
     | (_, 2) :: _ -> Rank.OnePair
     | _ -> HighCard
-
-  let first_card hand = hand |> Hand.cards |> List.hd
 
   type ranked_hand = Rank.t * Hand.t
 
@@ -199,5 +180,70 @@ module Part1 = struct
 end
 
 module Part2 = struct
-  let run _ = failwith "unimplemented"
+  let rank_of_cards (cards : Card.t list) : Rank.t =
+    let totals = cards |> Totals.of_list in
+    let non_joker_counts =
+      totals
+      |> Totals.to_seq
+      |> Seq.filter (function Card.J, _ -> false | _ -> true)
+      |> List.of_seq
+      |> List.sort (fun (card1, count1) (card2, count2) ->
+             match Int.compare count1 count2 with
+             | 0 -> Card.compare card1 card2
+             | other -> Int.neg other)
+    and num_jokers = Totals.get Card.J totals in
+
+    match (non_joker_counts, num_jokers) with
+    | [ (_, 5) ], _ -> Rank.FiveOfAKind
+    | (_, 4) :: _, 0 -> Rank.FourOfAKind
+    | (_, 4) :: _, 1 -> Rank.FiveOfAKind
+    | [ (_, 3); (_, 2) ], _ -> Rank.FullHouse
+    | (_, 3) :: _, 0 -> Rank.ThreeOfAKind
+    | (_, 3) :: _, 1 -> Rank.FourOfAKind
+    | (_, 3) :: _, 2 -> Rank.FiveOfAKind
+    | (_, 2) :: (_, 2) :: _, 0 -> Rank.TwoPair
+    | (_, 2) :: (_, 2) :: _, 1 -> Rank.FullHouse
+    | (_, 2) :: _, 0 -> Rank.OnePair
+    | (_, 2) :: _, 1 -> Rank.ThreeOfAKind
+    | (_, 2) :: _, 2 -> Rank.FourOfAKind
+    | (_, 2) :: _, 3 -> Rank.FiveOfAKind
+    | _, 1 -> OnePair
+    | _, 2 -> ThreeOfAKind
+    | _, 3 -> FourOfAKind
+    | _, 4 -> FiveOfAKind
+    | _, 5 -> FiveOfAKind
+    | _ -> HighCard
+
+  let card_as_int = function Card.J -> 1 | other -> Card.to_int other
+  let cmp_cards a b = Int.compare (card_as_int a) (card_as_int b)
+
+  type ranked_hand = Rank.t * Hand.t
+
+  let rank_hand (hand : Hand.t) : ranked_hand =
+    (rank_of_cards @@ Hand.cards hand, hand)
+
+  let cmp_ranked_hands : ranked_hand -> ranked_hand -> int =
+   fun a b ->
+    match Rank.compare (fst a) (fst b) with
+    | 0 -> List.compare cmp_cards (Hand.cards @@ snd a) (Hand.cards @@ snd b)
+    | other -> other
+
+  let sort_hands : Hand.t Seq.t -> Hand.t Seq.t =
+   fun hands ->
+    hands
+    |> Seq.map rank_hand
+    |> List.of_seq
+    |> List.sort cmp_ranked_hands
+    |> List.to_seq
+    |> Seq.map snd
+
+  let run : Input.t -> int =
+   fun hands ->
+    hands
+    |> sort_hands
+    |> Seq.mapi (fun i hand ->
+           let rank = Int.succ i and wager = Hand.wager hand in
+
+           Int.mul rank wager)
+    |> Seq.fold_left ( + ) 0
 end
