@@ -4,15 +4,18 @@ let raw_input = {|0 3 6 9 12 15
 
 let pp_z : Z.t Fmt.t = Fmt.using Z.to_string Fmt.string
 let z : Z.t Alcotest.testable = Alcotest.testable pp_z Z.equal
-let ( ~$ ) = Z.( ~$ )
 
 let test_part1 () =
-  let expected = ~$114
+  let expected = Z.of_int 114
   and actual = Day9.Part1.run (Day9.Input.of_string raw_input) in
 
   Alcotest.(check z) "sum of extrapolated" expected actual
 
-let test_part2 () = Alcotest.skip ()
+let test_part2 () =
+  let expected = Z.of_int 2
+  and actual = Day9.Part2.run (Day9.Input.of_string raw_input) in
+
+  Alcotest.(check z) "sum of extrapolated" expected actual
 
 let () =
   let open Alcotest in
