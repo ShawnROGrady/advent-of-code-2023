@@ -1,7 +1,7 @@
 module Main = Runner.Make (struct
   let day = 8
 
-  module Answer = Int
+  module Answer = Int64
   include Day8
 end)
 

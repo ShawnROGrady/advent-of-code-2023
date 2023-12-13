@@ -53,6 +53,8 @@ module Graph = struct
   let get (k : string) (d : Direction.t) (g : t) : string =
     let l, r = StringMap.find k g in
     match d with Direction.Left -> l | Direction.Right -> r
+
+  let keys (g : t) : string Seq.t = g |> StringMap.to_seq |> Seq.map fst
 end
 
 let uncons (x : 'a Seq.t) : 'a * 'a Seq.t =
@@ -68,7 +70,7 @@ module Walker = struct
   let steps ~start ~stop (walker : t) : int =
     let g = walker.graph in
     let rec loop cur_steps cur_key ds =
-      if String.equal cur_key stop then cur_steps
+      if stop cur_key then cur_steps
       else
         let d, ds' = uncons ds in
         let next_key = Graph.get cur_key d g
@@ -79,13 +81,47 @@ module Walker = struct
 end
 
 module Part1 = struct
-  let run : Input.t -> int =
+  let run : Input.t -> int64 =
    fun (directions, nodes) ->
     let graph = Graph.of_seq nodes in
     let walker = Walker.make ~graph ~directions in
-    walker |> Walker.steps ~start:"AAA" ~stop:"ZZZ"
+
+    walker
+    |> Walker.steps ~start:"AAA" ~stop:(String.equal "ZZZ")
+    |> Int64.of_int
 end
 
+module Int64Syntax = struct
+  let ( = ) = Int64.equal
+  let ( * ) = Int64.mul
+  let ( / ) = Int64.div
+  let ( % ) = Int64.rem
+  let min = Int64.min
+  let max = Int64.max
+  let abs = Int64.abs
+end
+
+let rec gcd a b =
+  let open Int64Syntax in
+  if b = 0L then a else if a = 0L then b else gcd (min a b) (max a b % min a b)
+
+let lcm a b =
+  let open Int64Syntax in
+  abs (a * b) / gcd b a
+
 module Part2 = struct
-  let run _ = failwith "unimplemented"
+  let ends_with_a = String.ends_with ~suffix:"A"
+  let ends_with_z = String.ends_with ~suffix:"Z"
+
+  let run : Input.t -> int64 =
+   fun (ds, nodes) ->
+    let graph = Graph.of_seq nodes and directions = ds in
+
+    let init_occupied = graph |> Graph.keys |> Seq.filter ends_with_a
+    and walker = Walker.make ~graph ~directions in
+
+    init_occupied
+    |> Seq.map (fun start -> Walker.steps ~start ~stop:ends_with_z walker)
+    |> Seq.map Int64.of_int
+    |> Seq.fold_left lcm 1L
 end
