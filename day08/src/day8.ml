@@ -120,6 +120,15 @@ module Part2 = struct
     let init_occupied = graph |> Graph.keys |> Seq.filter ends_with_a
     and walker = Walker.make ~graph ~directions in
 
+    (* NOTE: at least for my input, it turned out that it was sufficient to
+       just inspect the first cycle. Originally I thought that for a given 'A'
+       node at i=0, the cycle would only start repeating after i+N or multiple
+       'Z' nodes would be visited within a cycle, which lead to a much more
+       complex solution. After testing the more complex solution, I found that
+       (at least for my input) for a given 'A' node the cycle will always end
+       up back at the same 'A' node and only ever land on a single 'Z' node,
+       meaning the solution is just the least-common-multiple of how many steps
+       it takes to get from each 'A' node to its corresponding 'Z' node. *)
     init_occupied
     |> Seq.map (fun start -> Walker.steps ~start ~stop:ends_with_z walker)
     |> Seq.map Int64.of_int
