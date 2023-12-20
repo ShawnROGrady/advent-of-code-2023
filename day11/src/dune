@@ -1,0 +1,9 @@
+(library
+ (name day11)
+ (modules day11)
+ (libraries fmt))
+
+(executable
+ (name main)
+ (modules main)
+ (libraries day11 runner))
