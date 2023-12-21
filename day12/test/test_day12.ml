@@ -12,7 +12,11 @@ let test_part1 () =
 
   Alcotest.(check int) "sum of arrangements" expected actual
 
-let test_part2 () = Alcotest.skip ()
+let test_part2 () =
+  let expected = 525152
+  and actual = Day12.Part2.run (Day12.Input.of_string raw_input) in
+
+  Alcotest.(check int) "sum of arrangements" expected actual
 
 let () =
   let open Alcotest in
