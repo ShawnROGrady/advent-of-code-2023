@@ -1,9 +1,9 @@
 (library
  (name day12)
  (modules day12)
- (libraries fmt))
+ (libraries fmt zarith))
 
 (executable
  (name main)
  (modules main)
- (libraries day12 runner))
+ (libraries day12 runner zarith))

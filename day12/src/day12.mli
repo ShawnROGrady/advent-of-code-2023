@@ -6,9 +6,9 @@ module Input : sig
 end
 
 module Part1 : sig
-  val run : Input.t -> int
+  val run : Input.t -> Z.t
 end
 
 module Part2 : sig
-  val run : Input.t -> int
+  val run : Input.t -> Z.t
 end
