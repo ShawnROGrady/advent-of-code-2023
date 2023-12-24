@@ -24,7 +24,11 @@ let test_part1 () =
 
   Alcotest.(check z) "summary" expected actual
 
-let test_part2 () = Alcotest.skip ()
+let test_part2 () =
+  let expected = Z.of_int 400
+  and actual = Day13.Part2.run (Day13.Input.of_string raw_input) in
+
+  Alcotest.(check z) "summary" expected actual
 
 let () =
   let open Alcotest in
