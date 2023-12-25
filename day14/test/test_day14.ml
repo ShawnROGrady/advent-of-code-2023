@@ -19,7 +19,11 @@ let test_part1 () =
 
   Alcotest.(check z) "total load" expected actual
 
-let test_part2 () = Alcotest.skip ()
+let test_part2 () =
+  let expected = Z.of_int 64
+  and actual = Day14.Part2.run (Day14.Input.of_string raw_input) in
+
+  Alcotest.(check z) "total load" expected actual
 
 let () =
   let open Alcotest in
