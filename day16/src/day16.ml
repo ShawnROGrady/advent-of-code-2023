@@ -70,6 +70,7 @@ module Grid = struct
 
   let make ~modifiers ~max_x ~max_y = { modifiers; max_x; max_y }
   let max_y grid = grid.max_y
+  let max_x grid = grid.max_x
 
   let in_bounds ((x, y) : Point.t) (grid : t) : bool =
     x >= 0 && y >= 0 && x < grid.max_x && y < grid.max_y
@@ -188,9 +189,9 @@ module State = struct
               visited = visited';
             })
 
-  let init grid =
+  let init (point, dir) =
     {
-      beam_points = [ ((0, Int.pred @@ Grid.max_y grid), Direction.Right) ];
+      beam_points = [ (point, dir) ];
       energized = PointSet.empty;
       visited = Beam_point_set.empty;
     }
@@ -203,11 +204,54 @@ module Part1 = struct
       | state -> loop (State.step grid state)
     in
 
-    loop (State.init grid)
+    loop @@ State.init ((0, Int.pred @@ Grid.max_y grid), Direction.Right)
 
   let run : Input.t -> int = energized_squares
 end
 
+let range stop = Seq.take stop (Seq.ints 0)
+
 module Part2 = struct
-  let run _ = failwith "unimplemented"
+  let top_edge_points grid =
+    let y = Int.pred @@ Grid.max_y grid in
+    range (Grid.max_x grid) |> Seq.map (fun x -> (x, y))
+
+  let bottom_edge_points grid =
+    let y = 0 in
+    range (Grid.max_x grid) |> Seq.map (fun x -> (x, y))
+
+  let left_edge_points grid =
+    let x = 0 in
+    range (Grid.max_y grid) |> Seq.map (fun y -> (x, y))
+
+  let right_edge_points grid =
+    let x = Int.pred @@ Grid.max_x grid in
+    range (Grid.max_y grid) |> Seq.map (fun y -> (x, y))
+
+  let possible_starts grid =
+    let top =
+      top_edge_points grid |> Seq.map (fun point -> (point, Direction.Down))
+    and bottom =
+      bottom_edge_points grid |> Seq.map (fun point -> (point, Direction.Up))
+    and left =
+      left_edge_points grid |> Seq.map (fun point -> (point, Direction.Right))
+    and right =
+      right_edge_points grid |> Seq.map (fun point -> (point, Direction.Left))
+    in
+
+    Seq.append top @@ Seq.append bottom @@ Seq.append left right
+
+  let max (xs : int Seq.t) : int = xs |> Seq.fold_left Int.max 0
+
+  let energized_squares grid start =
+    let rec loop = function
+      | { State.beam_points = []; energized; _ } -> PointSet.cardinal energized
+      | state -> loop (State.step grid state)
+    in
+
+    loop @@ State.init start
+
+  let run : Input.t -> int =
+   fun grid ->
+    grid |> possible_starts |> Seq.map (energized_squares grid) |> max
 end

@@ -16,7 +16,11 @@ let test_part1 () =
 
   Alcotest.(check int) "energized tiles" expected actual
 
-let test_part2 () = Alcotest.skip ()
+let test_part2 () =
+  let expected = 51
+  and actual = Day16.Part2.run (Day16.Input.of_string raw_input) in
+
+  Alcotest.(check int) "energized tiles" expected actual
 
 let () =
   let open Alcotest in
