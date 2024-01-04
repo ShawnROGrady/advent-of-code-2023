@@ -1,11 +1,10 @@
-[@@@ocaml.warning "-32"]
+let range ?(start = 0) stop = start |> Seq.ints |> Seq.take (stop - start)
 
 module Direction = struct
   type t = Up | Down | Left | Right
 
-  let as_int = function Up -> 0 | Down -> 1 | Left -> 2 | Right -> 3
-  let compare a b : int = Int.compare (as_int a) (as_int b)
-  let equal a b : bool = Int.equal 0 @@ compare a b
+  let[@inline] as_int = function Up -> 0 | Down -> 1 | Left -> 2 | Right -> 3
+  let[@inline] compare a b : int = Int.compare (as_int a) (as_int b)
 
   let rotate_left = function
     | Up -> Left
@@ -18,14 +17,6 @@ module Direction = struct
     | Right -> Down
     | Down -> Left
     | Left -> Up
-
-  let pp : t Fmt.t =
-    Fmt.string
-    |> Fmt.using (function
-         | Up -> "Up"
-         | Down -> "Down"
-         | Left -> "Left"
-         | Right -> "Right")
 end
 
 module Point = struct
@@ -34,20 +25,23 @@ module Point = struct
   let x : t -> int = fst
   let y : t -> int = snd
 
-  let compare a b : int =
+  let[@inline] compare a b : int =
     match Int.compare (x a) (x b) with
     | 0 -> Int.compare (y a) (y b)
     | other -> other
 
-  let equal a b = Int.equal 0 (compare a b)
-  let add (a : t) (b : t) : t = (x a + x b, y a + y b)
+  let[@inline] equal a b = Int.equal 0 (compare a b)
+  let[@inline] add (a : t) (b : t) : t = (x a + x b, y a + y b)
+  let[@inline] sub (a : t) (b : t) : t = (x a - x b, y a - y b)
+  let[@inline] mul scale ((x, y) : t) : t = (scale * x, scale * y)
 
-  let move : Direction.t -> t -> t = function
-    | Direction.Up -> add (0, 1)
-    | Direction.Down -> add (0, -1)
-    | Direction.Left -> add (-1, 0)
-    | Direction.Right -> add (1, 0)
+  let[@inline] of_direction : Direction.t -> t = function
+    | Direction.Up -> (0, 1)
+    | Direction.Down -> (0, -1)
+    | Direction.Left -> (-1, 0)
+    | Direction.Right -> (1, 0)
 
+  let move : Direction.t -> t -> t = fun d -> add (of_direction d)
   let pp : t Fmt.t = Fmt.Dump.pair Fmt.int Fmt.int
 end
 
@@ -57,80 +51,61 @@ module type OrderedType = sig
   val compare : t -> t -> int
 end
 
-module Tree = struct
-  exception Empty
-
-  module type S = sig
-    type 'a t
-    type key
-
-    (* Constructors *)
-    val empty : 'a t
-    val singleton : key * 'a -> 'a t
-
-    (* Checks *)
-    val is_empty : 'a t -> bool
-
-    (* Transformations *)
-    val add : key * 'a -> 'a t -> 'a t
-    val pop_min : 'a t -> (key * 'a) * 'a t
-  end
-
-  module Make (Ord : OrderedType) : S with type key = Ord.t = struct
-    type key = Ord.t
-    type 'a data = key * 'a
-
-    type 'a node = { data : 'a data; left : 'a t; right : 'a t }
-    and 'a t = 'a node option
-
-    let empty : 'a t = None
-    let singleton data : 'a t = Some { data; left = None; right = None }
-
-    (* Checks *)
-    let is_empty : 'a t -> bool = Option.is_none
-
-    (* Transformations *)
-    let rec add (data : 'a data) : 'a t -> 'a t = function
-      | None -> singleton data
-      | Some node ->
-          if Ord.compare (fst data) (fst node.data) <= 0 then
-            Some { node with left = add data node.left }
-          else Some { node with right = add data node.right }
-
-    let rec pop_min = function
-      | None -> raise Empty
-      | Some node -> (
-          try
-            let min, left_tree = pop_min node.left in
-            (min, Some { node with left = left_tree })
-          with Empty -> (node.data, node.right))
-  end
-end
-
 module PQueue = struct
   exception Empty
 
-  module T = Tree.Make (Int)
+  module type S = sig
+    type data
+    type elem = int * data
+    type t
 
-  type 'a t = 'a T.t
+    val empty : t
 
-  let empty : 'a t = T.empty
-  let singleton : int * 'a -> 'a t = T.singleton
-  let is_empty : 'a t -> bool = T.is_empty
-  let add : int * 'a -> 'a t -> 'a t = T.add
+    (* Checks *)
+    val is_empty : t -> bool
 
-  let pop_min (q : 'a t) : (int * 'a) * 'a t =
-    try T.pop_min q with Tree.Empty -> raise Empty
+    (* Transformations *)
+    val add : elem -> t -> t
+    val pop_min : t -> elem * t
+  end
 
-  let pop_min_opt (q : 'a t) : ((int * 'a) * 'a t) option =
-    try Some (pop_min q) with Empty -> None
+  module Make (Ord : OrderedType) : S with type data = Ord.t = struct
+    type data = Ord.t
+
+    module Elem = struct
+      type t = int * data
+
+      let priority : t -> int = fst
+      let data : t -> data = snd
+
+      let compare (a : t) (b : t) : int =
+        match Int.compare (priority a) (priority b) with
+        | 0 -> Ord.compare (data a) (data b)
+        | other -> other
+    end
+
+    type elem = Elem.t
+
+    module Elems = Set.Make (Elem)
+
+    type t = Elems.t
+
+    let empty : t = Elems.empty
+    let is_empty : t -> bool = Elems.is_empty
+    let add : Elem.t -> t -> t = Elems.add
+
+    let pop_min (q : t) =
+      try
+        let min_elem = Elems.min_elt q in
+        (min_elem, Elems.remove min_elem q)
+      with Invalid_argument _ -> raise Empty
+  end
 end
 
 (* Explicit sig to prevent mutating array *)
 module Grid : sig
   type t
 
-  val in_bounds : Point.t -> t -> bool
   val heat_loss_at : Point.t -> t -> int
   val max_x : t -> int
   val max_y : t -> int
@@ -146,12 +121,12 @@ end = struct
   let max_y grid = grid.max_y
   let max_x grid = grid.max_x
 
-  let in_bounds ((x, y) : Point.t) (grid : t) : bool =
+  let[@inline] in_bounds ((x, y) : Point.t) (grid : t) : bool =
     x >= 0 && y >= 0 && x < grid.max_x && y < grid.max_y
 
   let heat_loss_at (point : Point.t) (grid : t) : int =
     if not (in_bounds point grid) then
-      failwith @@ Fmt.str "no heat loss at %a" Point.pp point
+      raise @@ Invalid_argument (Fmt.str "no heat loss at %a" Point.pp point)
     else Bigarray.Array2.get grid.heat_losses (Point.y point) (Point.x point)
 
   let reverse_arr a =
@@ -197,21 +172,128 @@ module Input = struct
     s |> String.split_on_char '\n' |> List.to_seq |> Seq.map parse_line
 end
 
-module Crucible = struct
-  type t = { pos : Point.t; dir : Direction.t; steps_in_dir : int }
+module type CRUCIBLE = sig
+  type t
 
-  let make ~pos ~dir ~steps_in_dir = { pos; dir; steps_in_dir }
-  let init (pos, dir) = make ~pos ~dir ~steps_in_dir:0
+  val init : Point.t * Direction.t -> t
+  val pos : t -> Point.t
+  val dir : t -> Direction.t
+  val heat_loss : t -> int
+  val steps_in_dir : t -> int
+  val next_states : Grid.t -> t -> t Seq.t
+end
+
+module Path (Crucible : CRUCIBLE) = struct
+  let compare_crucibles (a : Crucible.t) (b : Crucible.t) : int =
+    let open Crucible in
+    match Point.compare (pos a) (pos b) with
+    | 0 -> (
+        match Direction.compare (dir a) (dir b) with
+        | 0 -> Int.compare (steps_in_dir a) (steps_in_dir b)
+        | other -> other)
+    | other -> other
+
+  module OrderedCrucible = struct
+    type t = Crucible.t
+
+    let compare = compare_crucibles
+  end
+
+  module CrucibleSet = Set.Make (OrderedCrucible)
+  module Q = PQueue.Make (OrderedCrucible)
+
+  let rec min_heat_loss_aux (grid : Grid.t) (target : Point.t) (cur_min : Int.t)
+      (q : Q.t) (visited : CrucibleSet.t) =
+    if Q.is_empty q then cur_min
+    else
+      let (dist_u, u), q' = Q.pop_min q in
+      if dist_u >= cur_min then
+        (min_heat_loss_aux [@tailcall]) grid target cur_min q' visited
+      else if Point.equal target (Crucible.pos u) then
+        let cur_min' = Int.min cur_min dist_u in
+        (min_heat_loss_aux [@tailcall]) grid target cur_min' q' visited
+      else
+        let q'', visited' =
+          u
+          |> Crucible.next_states grid
+          |> Seq.fold_left
+               (fun (q, visited) v ->
+                 let dx, dy = Point.sub target (Crucible.pos v) in
+                 let dist_v = Crucible.heat_loss v in
+                 if dist_v + Int.abs dx + Int.abs dy >= cur_min then (q, visited)
+                 else if CrucibleSet.mem v visited then (q, visited)
+                 else (Q.add (dist_v, v) q, CrucibleSet.add v visited))
+               (q', visited)
+        in
+        (min_heat_loss_aux [@tailcall]) grid target cur_min q'' visited'
+
+  let min_heat_loss (grid : Grid.t) (source : Point.t) (target : Point.t) =
+    let start1, start2 =
+      ( Crucible.init (source, Direction.Right),
+        Crucible.init (source, Direction.Down) )
+    in
+    let q = Q.empty |> Q.add (0, start1) |> Q.add (0, start2)
+    and visited =
+      CrucibleSet.empty |> CrucibleSet.add start1 |> CrucibleSet.add start2
+    and cur_min = Int.max_int in
+    min_heat_loss_aux grid target cur_min q visited |> Z.of_int
+end
+
+module BaseCrucible = struct
+  type t = {
+    pos : Point.t;
+    dir : Direction.t;
+    steps_in_dir : int;
+    heat_loss : int;
+  }
+
+  let make ~pos ~dir ~steps_in_dir ~heat_loss =
+    { pos; dir; steps_in_dir; heat_loss }
+
+  let init (pos, dir) = make ~pos ~dir ~steps_in_dir:0 ~heat_loss:0
   let pos crucible = crucible.pos
   let dir crucible = crucible.dir
   let steps_in_dir crucible = crucible.steps_in_dir
+  let heat_loss crucible = crucible.heat_loss
 
-  let advance crucible =
+  let advance grid crucible =
+    let pos' = Point.move (dir crucible) (pos crucible)
+    and steps_in_dir' = Int.succ crucible.steps_in_dir in
+    let heat_loss' = heat_loss crucible + Grid.heat_loss_at pos' grid in
     {
       crucible with
-      pos = Point.move crucible.dir crucible.pos;
-      steps_in_dir = Int.succ crucible.steps_in_dir;
+      pos = pos';
+      steps_in_dir = steps_in_dir';
+      heat_loss = heat_loss';
     }
+
+  let advance_by_aux n grid crucible =
+    let d = dir crucible in
+    let visited =
+      range n |> Seq.scan (fun point _ -> Point.move d point) (pos crucible)
+    in
+    let pos' = Point.add (pos crucible) (Point.mul n (Point.of_direction d))
+    and heat_loss' =
+      visited
+      |> Seq.drop 1
+      |> Seq.fold_left
+           (fun loss point -> loss + Grid.heat_loss_at point grid)
+           (heat_loss crucible)
+    in
+    {
+      crucible with
+      pos = pos';
+      steps_in_dir = n + steps_in_dir crucible;
+      heat_loss = heat_loss';
+    }
+
+  let advance_by = function 1 -> advance | other -> advance_by_aux other
+
+  let advance_opt grid crucible =
+    try Some (advance grid crucible) with Invalid_argument _ -> None
+
+  let advance_by_opt n grid crucible =
+    try Some (advance_by n grid crucible) with Invalid_argument _ -> None
 
   let turn_left crucible =
     { crucible with dir = Direction.rotate_left crucible.dir; steps_in_dir = 0 }
@@ -222,56 +304,31 @@ module Crucible = struct
       dir = Direction.rotate_right crucible.dir;
       steps_in_dir = 0;
     }
-
-  let next_states crucible =
-    [
-      advance crucible;
-      turn_left crucible |> advance;
-      turn_right crucible |> advance;
-    ]
-
-  let compare (a : t) (b : t) : int =
-    match Point.compare (pos a) (pos b) with
-    | 0 -> (
-        match Direction.compare (dir a) (dir b) with
-        | 0 -> Int.compare (steps_in_dir a) (steps_in_dir b)
-        | other -> other)
-    | other -> other
 end
 
-module CrucibleMap = Map.Make (Crucible)
-module CrucibleSet = Set.Make (Crucible)
+module Crucible = struct
+  include BaseCrucible
 
-let rec min_heat_loss_aux (grid : Grid.t) (target : Point.t) (cur_min : Int.t)
-    (q : Crucible.t PQueue.t) (visited : CrucibleSet.t) =
-  if PQueue.is_empty q then cur_min
-  else
-    let (dist_u, u), q' = PQueue.pop_min q in
-    if Point.equal target (Crucible.pos u) && dist_u < cur_min then
-      min_heat_loss_aux grid target dist_u q' visited
-    else
-      let q'', visited' =
-        u
-        |> Crucible.next_states
-        |> List.filter (fun crucible ->
-               Grid.in_bounds (Crucible.pos crucible) grid
-               && Crucible.steps_in_dir crucible <= 3
-               && not (CrucibleSet.mem crucible visited))
-        |> List.fold_left
-             (fun (q, visited) v ->
-               let dist_v = dist_u + Grid.heat_loss_at (Crucible.pos v) grid in
-               (PQueue.add (dist_v, v) q, CrucibleSet.add v visited))
-             (q', visited)
-      in
-      min_heat_loss_aux grid target cur_min q'' visited'
+  let orientations : (t -> t) list = [ turn_left; turn_right; Fun.id ]
+  let turns : (t -> t) list = [ turn_left; turn_right ]
 
-let min_heat_loss (grid : Grid.t) (start : Crucible.t) (target : Point.t) =
-  let q = PQueue.singleton (0, start)
-  and visited = CrucibleSet.singleton start
-  and cur_min = Int.max_int in
-  min_heat_loss_aux grid target cur_min q visited |> Z.of_int
+  let next_states_aux grid crucible turns =
+    turns
+    |> List.fold_left
+         (fun states turn ->
+           match advance_opt grid (turn crucible) with
+           | None -> states
+           | Some crucible' -> Seq.cons crucible' states)
+         Seq.empty
+
+  let next_states grid crucible : t Seq.t =
+    if steps_in_dir crucible >= 3 then next_states_aux grid crucible turns
+    else next_states_aux grid crucible orientations
+end
 
 module Part1 = struct
+  module P = Path (Crucible)
+
   let run : Input.t -> Z.t =
    fun seq ->
     let grid = Grid.of_seq seq in
@@ -279,11 +336,45 @@ module Part1 = struct
     let source = (0, Int.pred @@ Grid.max_y grid)
     and target = (Int.pred @@ Grid.max_x grid, 0) in
 
-    let start = Crucible.init (source, Direction.Right) in
+    P.min_heat_loss grid source target
+end
 
-    min_heat_loss grid start target
+module UltraCrucible = struct
+  include BaseCrucible
+
+  let advance_to_stop grid crucible =
+    advance_by_opt (Int.max 1 (4 - steps_in_dir crucible)) grid crucible
+
+  let orientations : (t -> t) list = [ turn_left; turn_right; Fun.id ]
+  let turns : (t -> t) list = [ turn_left; turn_right ]
+
+  let next_states_aux grid crucible turns =
+    turns
+    |> List.fold_left
+         (fun states turn ->
+           match advance_to_stop grid (turn crucible) with
+           | None -> states
+           | Some crucible' -> Seq.cons crucible' states)
+         Seq.empty
+
+  let next_states grid crucible : t Seq.t =
+    if steps_in_dir crucible < 4 then
+      match advance_to_stop grid crucible with
+      | None -> Seq.empty
+      | Some next -> Seq.return next
+    else if steps_in_dir crucible >= 10 then next_states_aux grid crucible turns
+    else next_states_aux grid crucible orientations
 end
 
 module Part2 = struct
-  let run _ = failwith "unimplemented"
+  module P = Path (UltraCrucible)
+
+  let run : Input.t -> Z.t =
+   fun seq ->
+    let grid = Grid.of_seq seq in
+
+    let source = (0, Int.pred @@ Grid.max_y grid)
+    and target = (Int.pred @@ Grid.max_x grid, 0) in
+
+    P.min_heat_loss grid source target
 end

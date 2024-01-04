@@ -22,12 +22,35 @@ let test_part1 () =
 
   Alcotest.(check z) "minimal heat loss" expected actual
 
-let test_part2 () = Alcotest.skip ()
+let part2_example2 =
+  {|111111111111
+999999999991
+999999999991
+999999999991
+999999999991|}
+
+let part2_test input expected () =
+  let actual = Day17.Part2.run input in
+  Alcotest.(check z) "minimal heat loss" (Z.of_int expected) actual
+
+let part2_test_case name input expected =
+  Alcotest.test_case
+    (Printf.sprintf "Part2 %s" name)
+    `Quick
+    (part2_test input expected)
+
+let part2_tests =
+  [ ("Example1", raw_input, 94); ("Example2", part2_example2, 71) ]
+
+let part2_test_cases =
+  part2_tests
+  |> List.map (fun (name, input_str, expected) ->
+         part2_test_case name (Day17.Input.of_string input_str) expected)
 
 let () =
   let open Alcotest in
   run "Day17"
     [
       ("part1", [ test_case "Part1" `Quick test_part1 ]);
-      ("part2", [ test_case "Part2" `Quick test_part2 ]);
+      ("part2", part2_test_cases);
     ]
