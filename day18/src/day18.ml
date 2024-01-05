@@ -187,7 +187,7 @@ module Part1 = struct
       (start : Point.t) : PointSet.t =
     points_outside_trench_aux in_bounds edges PointSet.empty [ start ]
 
-  let run : Input.t -> int =
+  let run : Input.t -> Z.t =
    fun insts ->
     let edges = insts |> Seq.fold_left dig init_state |> trench_edges in
 
@@ -203,12 +203,13 @@ module Part1 = struct
     let outside =
       points_outside_trench in_bounds edges (bounds.min_x - 1, bounds.min_y - 1)
     and search_area =
-      (bounds.max_x - bounds.min_x + 3) * (bounds.max_y - bounds.min_y + 3)
+      Z.of_int
+      @@ ((bounds.max_x - bounds.min_x + 3) * (bounds.max_y - bounds.min_y + 3))
     in
 
-    let outside_count = PointSet.cardinal outside in
+    let outside_count = Z.of_int @@ PointSet.cardinal outside in
 
-    search_area - outside_count
+    Z.sub search_area outside_count
 end
 
 module Part2 = struct
