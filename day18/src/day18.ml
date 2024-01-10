@@ -1,11 +1,5 @@
-let range ?(start = 0) stop = start |> Seq.ints |> Seq.take (stop - start)
-
 module Direction = struct
   type t = Up | Down | Left | Right
-
-  let[@inline] as_int = function Up -> 0 | Down -> 1 | Left -> 2 | Right -> 3
-  let[@warning "-32"] compare a b : int = Int.compare (as_int a) (as_int b)
-  let all = [ Up; Down; Left; Right ]
 
   let of_char = function
     | 'U' -> Up
@@ -13,6 +7,13 @@ module Direction = struct
     | 'L' -> Left
     | 'R' -> Right
     | other -> invalid_arg @@ Fmt.str "unrecognized direction '%c'" other
+
+  let of_int = function
+    | 0 -> Right
+    | 1 -> Down
+    | 2 -> Left
+    | 3 -> Up
+    | other -> invalid_arg @@ Fmt.str "unrecognized direction %d" other
 
   let pp : t Fmt.t =
     Fmt.string
@@ -36,15 +37,32 @@ module Point = struct
     | other -> other
 
   let[@inline] add (a : t) (b : t) : t = (x a + x b, y a + y b)
-
-  let[@inline] of_direction : Direction.t -> t = function
-    | Direction.Up -> (0, 1)
-    | Direction.Down -> (0, -1)
-    | Direction.Left -> (-1, 0)
-    | Direction.Right -> (1, 0)
-
-  let move : Direction.t -> t -> t = fun d -> add (of_direction d)
   let[@warning "-32"] pp : t Fmt.t = Fmt.Dump.pair Fmt.int Fmt.int
+end
+
+module Vector = struct
+  type t = { magnitude : int; direction : Direction.t }
+
+  let make ~magnitude ~direction = { magnitude; direction }
+  let magnitude v = v.magnitude
+  let direction v = v.direction
+
+  let apply (pos : Point.t) (vec : t) : Point.t =
+    let mag = magnitude vec in
+    match direction vec with
+    | Direction.Up -> Point.add (0, mag) pos
+    | Direction.Down -> Point.add (0, Int.neg mag) pos
+    | Direction.Left -> Point.add (Int.neg mag, 0) pos
+    | Direction.Right -> Point.add (mag, 0) pos
+
+  let[@warning "-32"] pp : t Fmt.t =
+    let open Fmt in
+    let open Fmt.Dump in
+    record
+      [
+        field "magnitude" magnitude int;
+        field "direction" direction Direction.pp;
+      ]
 end
 
 module Instruction = struct
@@ -54,6 +72,7 @@ module Instruction = struct
   let dir inst = inst.dir
   let steps inst = inst.steps
   let color inst = inst.color
+  let as_vector inst = Vector.make ~magnitude:inst.steps ~direction:inst.dir
 
   let pp : t Fmt.t =
     let open Fmt in
@@ -85,133 +104,194 @@ module Input = struct
     scan_instructions (Scanf.Scanning.from_string s)
 end
 
-module PointSet = Set.Make (Point)
+module PointSet = struct
+  include Set.Make (Point)
 
-module Bounds = struct
-  type t = { min_x : int; max_x : int; min_y : int; max_y : int }
+  let symmetric_diff (s1 : t) (s2 : t) : t = union (diff s1 s2) (diff s2 s1)
+end
+
+module Intersections = struct
+  module ByCoord = Map.Make (Int)
+
+  type t = {
+    all : PointSet.t;
+    by_x : PointSet.t ByCoord.t;
+    by_y : PointSet.t ByCoord.t;
+  }
+
+  let by_y idxs = idxs.by_y
+
+  let empty : t =
+    { all = PointSet.empty; by_x = ByCoord.empty; by_y = ByCoord.empty }
+
+  let update_by_coord p = function
+    | None -> Some (PointSet.singleton p)
+    | Some ps -> Some (PointSet.add p ps)
+
+  let add (point : Point.t) (idxs : t) : t =
+    let all = PointSet.add point idxs.all
+    and by_x = ByCoord.update (Point.x point) (update_by_coord point) idxs.by_x
+    and by_y =
+      ByCoord.update (Point.y point) (update_by_coord point) idxs.by_y
+    in
+    { all; by_x; by_y }
 
   let of_seq (points : Point.t Seq.t) : t =
-    let min_x, max_x, min_y, max_y =
-      points
-      |> Seq.fold_left
-           (fun (min_x, max_x, min_y, max_y) (x, y) ->
-             Int.(min x min_x, max x max_x, min y min_y, max y max_y))
-           (Int.max_int, 0, Int.max_int, 0)
+    points |> Seq.fold_left (fun cur p -> add p cur) empty
+end
+
+module Range = struct
+  type t = { start : Z.t; stop : Z.t }
+
+  let make ~start ~stop = { start; stop }
+
+  let length r =
+    let open Z in
+    r.stop - r.start + one
+
+  let inter (r1 : t) (r2 : t) : t option =
+    let open Z.Compare in
+    if r1.stop <= r2.start || r1.start >= r2.stop then None
+    else
+      let start, stop = (Z.max r1.start r2.start, Z.min r1.stop r2.stop) in
+      Some (make ~start ~stop)
+end
+
+module Lagoon : sig
+  type t
+
+  val of_intersections : Intersections.t -> t
+  val area : t -> Z.t
+end = struct
+  type t = { intersections : Intersections.t }
+
+  let of_intersections intersections = { intersections }
+
+  let range_xs_inside (points_at_y : PointSet.t) : Range.t Seq.t =
+    points_at_y
+    |> PointSet.to_seq
+    |> Seq.map Point.x
+    |> Seq.map Z.of_int
+    |> Seq.scan
+         (fun (inside, prev_x, _) x ->
+           if not inside then (true, x, None)
+           else (false, x, Some (Range.make ~start:prev_x ~stop:x)))
+         (false, Z.zero, None)
+    |> Seq.filter_map (fun (_, _, r) -> r)
+
+  let range_overlaps (r1s : Range.t Seq.t) (r2s : Range.t Seq.t) : Range.t Seq.t
+      =
+    Seq.product r1s r2s |> Seq.filter_map (fun (r1, r2) -> Range.inter r1 r2)
+
+  let sum_seq xs = xs |> Seq.fold_left Z.add Z.zero
+
+  let count_in_ranges (rs : Range.t Seq.t) : Z.t =
+    rs |> Seq.map Range.length |> sum_seq
+
+  type calculate_state = {
+    y : int;
+    points : PointSet.t;
+    contained : Range.t Seq.t;
+    contained_count : Z.t;
+    area : Z.t;
+  }
+
+  let init_state (y, points) =
+    let contained = range_xs_inside points in
+    let contained_count = count_in_ranges contained in
+    { y; points; contained; contained_count; area = contained_count }
+
+  let find_area_step (prev : calculate_state)
+      ((cur_y, cur_points) : int * PointSet.t) : calculate_state =
+    let open Z in
+    let adjusted_prevs =
+      prev.points |> PointSet.map (fun (x, _) -> (x, cur_y))
+    in
+    let cur_points' = PointSet.symmetric_diff adjusted_prevs cur_points in
+
+    let contained_by_next = range_xs_inside cur_points' in
+    let contained_by_both = range_overlaps prev.contained contained_by_next in
+
+    let count_inside_prev = prev.contained_count
+    and count_inside_next = count_in_ranges contained_by_next
+    and count_inside_both = count_in_ranges contained_by_both in
+
+    (* First find the box representing the area from the previous vertical
+       line to the current y. *)
+    let box_from_prev = (~$cur_y - ~$(prev.y)) * count_inside_prev
+    (* Next find the additional area added by the new intersections. *)
+    and extra_at_inter = count_inside_next - count_inside_both in
+
+    let area' = prev.area + box_from_prev + extra_at_inter in
+
+    {
+      y = cur_y;
+      points = cur_points';
+      contained = contained_by_next;
+      contained_count = count_inside_next;
+      area = area';
+    }
+
+  let area (lagoon : t) : Z.t =
+    let points_by_y =
+      lagoon.intersections |> Intersections.by_y |> Intersections.ByCoord.to_seq
+    in
+    let hd, rest =
+      match points_by_y () with
+      | Seq.Cons (hd, rest) -> (hd, rest)
+      | Seq.Nil -> failwith "area with empty points_by_y"
     in
 
-    { min_x; max_x; min_y; max_y }
+    let init = init_state hd in
 
-  let min_x bounds = bounds.min_x
-  let min_y bounds = bounds.min_y
-  let max_x bounds = bounds.max_x
-  let max_y bounds = bounds.max_y
-
-  let[@warning "-32"] pp : t Fmt.t =
-    let open Fmt in
-    let open Fmt.Dump in
-    record
-      [
-        field "min_x" min_x int;
-        field "max_x" max_x int;
-        field "min_y" min_y int;
-        field "max_y" max_y int;
-      ]
+    rest |> Seq.fold_left find_area_step init |> fun { area; _ } -> area
 end
 
 module Part1 = struct
-  let[@warning "-32"] draw_trench (trench : PointSet.t) : string =
-    let { Bounds.min_x; max_x; min_y; max_y } =
-      trench |> PointSet.to_seq |> Bounds.of_seq
-    in
-
-    let normalize_y y = y - min_y
-    and normalize_x x = x - min_x
-    and dim_y = max_y - min_y + 2
-    and dim_x = max_x - min_x + 2 in
-
-    let arr = Array.init dim_y (fun _ -> Array.make dim_x '.') in
-
-    trench
-    |> PointSet.iter (fun (x, y) ->
-           let normalized = (normalize_x x, normalize_y y) in
-           arr.(Point.y normalized).(Point.x normalized) <- '#');
-
-    arr
-    |> Array.to_list
-    |> List.map (fun row -> row |> Array.to_seq |> String.of_seq)
-    |> List.rev
-    |> String.concat "\n"
-
-  type dig_state = { trench_edges : PointSet.t; pos : Point.t }
-
-  let init_state =
-    { trench_edges = PointSet.singleton Point.origin; pos = Point.origin }
-
-  let trench_edges state = state.trench_edges
-
-  let advance_trench (dir : Direction.t) (state : dig_state) : dig_state =
-    let next_pos = Point.move dir state.pos in
-    { trench_edges = PointSet.add next_pos state.trench_edges; pos = next_pos }
-
-  let dig (state : dig_state) (inst : Instruction.t) =
-    inst
-    |> Instruction.steps
-    |> range
-    |> Seq.fold_left
-         (fun cur _ -> advance_trench (Instruction.dir inst) cur)
-         state
-
-  let rec points_outside_trench_aux (in_bounds : Point.t -> bool)
-      (edges : PointSet.t) (visited : PointSet.t) = function
-    | [] -> visited
-    | point :: rest when PointSet.mem point visited ->
-        points_outside_trench_aux in_bounds edges visited rest
-    | point :: rest ->
-        let visited' = PointSet.add point visited
-        and to_check =
-          Direction.all
-          |> List.fold_left
-               (fun to_check d ->
-                 let p = Point.move d point in
-                 if
-                   in_bounds p
-                   && (not (PointSet.mem p edges))
-                   && not (PointSet.mem p visited)
-                 then p :: to_check
-                 else to_check)
-               rest
-        in
-        points_outside_trench_aux in_bounds edges visited' to_check
-
-  let points_outside_trench (in_bounds : Point.t -> bool) (edges : PointSet.t)
-      (start : Point.t) : PointSet.t =
-    points_outside_trench_aux in_bounds edges PointSet.empty [ start ]
-
   let run : Input.t -> Z.t =
-   fun insts ->
-    let edges = insts |> Seq.fold_left dig init_state |> trench_edges in
+   fun instructions ->
+    let vecs = instructions |> Seq.map Instruction.as_vector in
 
-    let bounds : Bounds.t = Bounds.of_seq (PointSet.to_seq edges) in
-
-    let in_bounds p =
-      Point.x p >= bounds.min_x - 1
-      && Point.x p <= bounds.max_x + 1
-      && Point.y p >= bounds.min_y - 1
-      && Point.y p <= bounds.max_y + 1
+    let intersections =
+      vecs |> Seq.scan Vector.apply Point.origin |> Intersections.of_seq
     in
 
-    let outside =
-      points_outside_trench in_bounds edges (bounds.min_x - 1, bounds.min_y - 1)
-    and search_area =
-      Z.of_int
-      @@ ((bounds.max_x - bounds.min_x + 3) * (bounds.max_y - bounds.min_y + 3))
-    in
-
-    let outside_count = Z.of_int @@ PointSet.cardinal outside in
-
-    Z.sub search_area outside_count
+    intersections |> Lagoon.of_intersections |> Lagoon.area
 end
 
 module Part2 = struct
-  let run _ = failwith "unimplemented"
+  let int_of_hex_char : char -> int = function
+    | '0' .. '9' as c -> Char.code c - 48
+    | 'a' .. 'z' as c -> Char.code c - 87
+    | other -> invalid_arg @@ Fmt.str "invalid hex char '%c'" other
+
+  let int_of_rgb (cs : char list) : int =
+    cs
+    |> List.fold_left
+         (fun cur c -> Int.add (int_of_hex_char c) (Int.mul cur 16))
+         0
+
+  let vector_of_color_chars = function
+    | [ c1; c2; c3; c4; c5; c6 ] ->
+        let magnitude = int_of_rgb [ c1; c2; c3; c4; c5 ]
+        and direction = Direction.of_int @@ int_of_hex_char c6 in
+        Vector.make ~magnitude ~direction
+    | other -> invalid_arg @@ Fmt.str "invalid length %d" (List.length other)
+
+  let vector_of_color (color : string) : Vector.t =
+    try color |> String.to_seq |> List.of_seq |> vector_of_color_chars
+    with Invalid_argument msg ->
+      failwith @@ Fmt.str "vector_of_color %a: %s" Fmt.Dump.string color msg
+
+  let run : Input.t -> Z.t =
+   fun instructions ->
+    let vecs =
+      instructions |> Seq.map Instruction.color |> Seq.map vector_of_color
+    in
+
+    let intersections =
+      vecs |> Seq.scan Vector.apply Point.origin |> Intersections.of_seq
+    in
+
+    intersections |> Lagoon.of_intersections |> Lagoon.area
 end

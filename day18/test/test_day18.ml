@@ -25,12 +25,10 @@ let test_part1 () =
   Alcotest.(check z) "cubic meters" expected actual
 
 let test_part2 () =
-  if true then Alcotest.skip ()
-  else
-    let expected = Z.of_string "952408144115"
-    and actual = Day18.Part2.run (Day18.Input.of_string raw_input) in
+  let expected = Z.of_string "952408144115"
+  and actual = Day18.Part2.run (Day18.Input.of_string raw_input) in
 
-    Alcotest.(check z) "cubic meters" expected actual
+  Alcotest.(check z) "cubic meters" expected actual
 
 let () =
   let open Alcotest in
