@@ -1,0 +1,9 @@
+(library
+ (name day19)
+ (modules day19)
+ (libraries fmt str zarith))
+
+(executable
+ (name main)
+ (modules main)
+ (libraries day19 runner zarith))
