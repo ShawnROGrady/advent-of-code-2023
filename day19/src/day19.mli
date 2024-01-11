@@ -3,7 +3,6 @@ module Input : sig
 
   val of_in_channel : in_channel -> t
   val of_string : string -> t
-  val to_string : t -> string
   val pp : t Fmt.t
 end
 

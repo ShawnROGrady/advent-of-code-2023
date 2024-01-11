@@ -1,3 +1,7 @@
+let compose f g x = f (g x)
+let ( @. ) = compose
+let pp_z : Z.t Fmt.t = Fmt.using Z.to_string Fmt.string
+
 module Category = struct
   type t = X | M | A | S
 
@@ -6,8 +10,7 @@ module Category = struct
     | "m" -> M
     | "a" -> A
     | "s" -> S
-    | other ->
-        invalid_arg @@ Fmt.str "invalid category: %a" Fmt.Dump.string other
+    | other -> Fmt.invalid_arg "invalid category: %a" Fmt.Dump.string other
 
   let to_string = function X -> "x" | M -> "m" | A -> "a" | S -> "s"
   let all = [ X; M; A; S ]
@@ -23,7 +26,7 @@ module Category = struct
 end
 
 module Part = struct
-  type t = { x : int; m : int; a : int; s : int }
+  type 'a t = { x : 'a; m : 'a; a : 'a; s : 'a }
 
   let make ~x ~m ~a ~s = { x; m; a; s }
   let x part = part.x
@@ -31,85 +34,28 @@ module Part = struct
   let a part = part.a
   let s part = part.s
 
-  let get : Category.t -> t -> int = function
+  let get : Category.t -> 'a t -> 'a = function
     | Category.X -> x
     | Category.M -> m
     | Category.A -> a
     | Category.S -> s
 
-  let to_string part =
-    let body =
-      Category.all
-      |> List.map (fun cat ->
-             Printf.sprintf "%s=%d" (Category.to_string cat) (get cat part))
-      |> String.concat ","
-    in
-    "{" ^ body ^ "}"
+  let with_x x part = { part with x }
+  let with_m m part = { part with m }
+  let with_a a part = { part with a }
+  let with_s s part = { part with s }
 
-  let pp : t Fmt.t =
-    let pp_field cat =
-      Fmt.Dump.field (Category.to_string cat) (get cat) Fmt.int
-    in
+  let replace : Category.t -> 'a -> 'a t -> 'a t = function
+    | Category.X -> with_x
+    | Category.M -> with_m
+    | Category.A -> with_a
+    | Category.S -> with_s
+
+  let pp : 'a Fmt.t -> 'a t Fmt.t =
+   fun ppv ->
+    let pp_field cat = Fmt.Dump.field (Category.to_string cat) (get cat) ppv in
 
     Category.all |> List.map pp_field |> Fmt.Dump.record
-end
-
-module Cmp = struct
-  type t = Lt | Gt
-
-  let of_string = function
-    | "<" -> Lt
-    | ">" -> Gt
-    | other -> invalid_arg @@ Fmt.str "invalid cmp: %a" Fmt.Dump.string other
-
-  let to_string = function Lt -> "<" | Gt -> ">"
-  let ints = function Lt -> ( < ) | Gt -> ( > )
-
-  let pp : t Fmt.t =
-    Fmt.using (function Lt -> "Cmp.Lt" | Gt -> "Cmp.Gt") Fmt.string
-end
-
-module Cond = struct
-  type t = { lhs : Category.t; op : Cmp.t; rhs : int }
-
-  let make ~lhs ~op ~rhs = { lhs; op; rhs }
-  let lhs cond = cond.lhs
-  let op cond = cond.op
-  let rhs cond = cond.rhs
-
-  let to_fun (cond : t) : Part.t -> bool =
-   fun part -> (Cmp.ints @@ op cond) (Part.get (lhs cond) part) (rhs cond)
-
-  let matches part cond = (to_fun cond) part
-
-  let to_string cond =
-    Printf.sprintf "%s%s%d"
-      (Category.to_string @@ lhs cond)
-      (Cmp.to_string @@ op cond)
-      (rhs cond)
-
-  let pp : t Fmt.t =
-    let open Fmt in
-    let open Dump in
-    record
-      [ field "lhs" lhs Category.pp; field "op" op Cmp.pp; field "rhs" rhs int ]
-end
-
-module Predicate = struct
-  type t = Always | If of Cond.t
-
-  let matches (part : Part.t) = function
-    | Always -> true
-    | If cond -> Cond.matches part cond
-
-  let to_string = function
-    | Always -> ""
-    | If cond -> Printf.sprintf "%s:" (Cond.to_string cond)
-
-  let pp : t Fmt.t =
-   fun ppf -> function
-    | Always -> Fmt.string ppf "Always"
-    | If cond -> Fmt.pf ppf "(If %a)" Cond.pp cond
 end
 
 module PartStatus = struct
@@ -130,83 +76,90 @@ module RuleResult = struct
     | "R" -> Resolved PartStatus.Rejected
     | other -> Pending other
 
-  let to_string = function
-    | Resolved PartStatus.Accepted -> "A"
-    | Resolved PartStatus.Rejected -> "R"
-    | Pending next -> next
-
   let pp : t Fmt.t =
    fun ppf -> function
     | Resolved st -> Fmt.pf ppf "(Resolved %a)" PartStatus.pp st
     | Pending next -> Fmt.pf ppf "(Pending %a)" Fmt.Dump.string next
 end
 
-module Rule = struct
-  type t = { predicate : Predicate.t; result : RuleResult.t }
+module Operator = struct
+  type t = Lt | Gt | Le | Ge
 
-  let make ~predicate ~result = { predicate; result }
-  let predicate r = r.predicate
-  let result r = r.result
+  let inv = function Lt -> Ge | Le -> Gt | Gt -> Le | Ge -> Lt
 
-  let to_string rule =
-    (Predicate.to_string @@ predicate rule)
-    ^ RuleResult.to_string
-    @@ result rule
+  let pp_expr : t Fmt.t =
+    Fmt.string
+    |> Fmt.using (function Lt -> "<" | Le -> "<=" | Gt -> ">" | Ge -> ">=")
+end
 
-  let pp : t Fmt.t =
-    let get_result = result in
-    let open Fmt.Dump in
-    record
-      [
-        field "predicate" predicate Predicate.pp;
-        field "result" get_result RuleResult.pp;
-      ]
+module Expr = struct
+  type cond = { op : Operator.t; lhs : Category.t; rhs : Z.t }
+  type t = If of cond * t * t | Return of RuleResult.t
+
+  let if_ cond t e : t = If (cond, t, e)
+  let return v : t = Return v
+  let ( > ) lhs rhs = { op = Operator.Gt; lhs; rhs }
+  let ( < ) lhs rhs = { op = Operator.Lt; lhs; rhs }
+
+  let pp_cond : cond Fmt.t =
+   fun ppf v ->
+    Fmt.pf ppf "(%a %a %a)" Category.pp v.lhs Operator.pp_expr v.op pp_z v.rhs
+
+  let rec pp ppf expr =
+    let open Fmt in
+    match expr with
+    | Return v -> (parens (any "return" ++ sp ++ RuleResult.pp)) ppf v
+    | If (cond, t, e) ->
+        (parens
+           (any "if_"
+           ++ sp
+           ++ using fst (box pp_cond)
+           ++ sp
+           ++ using (fst @. snd) (box pp)
+           ++ sp
+           ++ using (snd @. snd) (box pp)))
+          ppf
+          (cond, (t, e))
 end
 
 module Workflow = struct
-  type t = { name : string; rules : Rule.t list }
+  type t = { name : string; rules : Expr.t }
 
   let make ~name ~rules = { name; rules }
   let name wf = wf.name
   let rules wf = wf.rules
 
-  let to_string wf =
-    name wf
-    ^ "{"
-    ^ (wf |> rules |> List.map Rule.to_string |> String.concat ",")
-    ^ "}"
-
   let pp : t Fmt.t =
     let open Fmt.Dump in
-    record [ field "name" name string; field "rules" rules @@ list Rule.pp ]
+    record [ field "name" name string; field "rules" rules Expr.pp ]
 end
 
 module Input = struct
-  type t = { workflows : Workflow.t list; parts : Part.t Seq.t }
+  type t = { workflows : Workflow.t list; parts : Z.t Part.t Seq.t }
   type scan_ic = Scanf.Scanning.in_channel
 
-  let rec parse_rules_aux xs () =
-    match xs with
-    | [] -> Seq.Nil
-    | [ x ] ->
-        let predicate = Predicate.Always and result = RuleResult.of_string x in
-        Seq.Cons (Rule.make ~predicate ~result, Seq.empty)
-    | x :: rest ->
-        let rule =
-          Scanf.sscanf x "%1[xmas]%1[<>]%d:%[a-zA-Z]"
-            (fun lhs_s op_s rhs res_s ->
-              let cond =
-                Cond.make ~lhs:(Category.of_string lhs_s)
-                  ~op:(Cmp.of_string op_s) ~rhs
-              in
-              let predicate = Predicate.If cond
-              and result = RuleResult.of_string res_s in
-              Rule.make ~predicate ~result)
+  let read_z (ic : scan_ic) : Z.t = Scanf.bscanf ic "%d" Z.of_int
+
+  let rec parse_rules_aux = function
+    | [] -> failwith "parse_rules_aux"
+    | [ last ] -> Expr.return (RuleResult.of_string last)
+    | to_parse :: rest ->
+        let open Expr in
+        Scanf.sscanf to_parse "%1[xmas]%1[<>]%r:%[a-zA-Z]" read_z
+        @@ fun lhs_s op_s rhs res_s ->
+        let part_field = Category.of_string lhs_s
+        and res = RuleResult.of_string res_s in
+        let cond =
+          match op_s with
+          | ">" -> part_field > rhs
+          | "<" -> part_field < rhs
+          | other -> Fmt.invalid_arg "unrecognized op=%a" Fmt.Dump.string other
         in
-        Seq.Cons (rule, parse_rules_aux rest)
+
+        if_ cond (return res) (parse_rules_aux rest)
 
   let comma = Str.regexp ","
-  let parse_rules s = s |> Str.split comma |> parse_rules_aux |> List.of_seq
+  let parse_rules s = s |> Str.split comma |> parse_rules_aux
 
   let read_workflow (ic : scan_ic) =
     Scanf.bscanf ic "%[a-zA-Z]{%s@}\n" (fun name to_parse ->
@@ -220,10 +173,10 @@ module Input = struct
     Seq.of_dispenser dispense
 
   let read_part (ic : scan_ic) =
-    Scanf.bscanf ic "{x=%d,m=%d,a=%d,s=%d} " (fun x m a s ->
-        Part.make ~x ~m ~a ~s)
+    Scanf.bscanf ic "{x=%r,m=%r,a=%r,s=%r} " read_z read_z read_z read_z
+      (fun x m a s -> Part.make ~x ~m ~a ~s)
 
-  let read_parts (ic : scan_ic) : Part.t Seq.t =
+  let read_parts (ic : scan_ic) : Z.t Part.t Seq.t =
     let dispense () = try Some (read_part ic) with End_of_file -> None in
     Seq.memoize @@ Seq.of_dispenser dispense
 
@@ -242,84 +195,203 @@ module Input = struct
   let workflows i = i.workflows
   let parts i = i.parts
 
-  let to_string i =
-    let wfs =
-      i |> workflows |> List.map Workflow.to_string |> String.concat "\n"
-    in
-
-    let ps =
-      i |> parts |> Seq.map Part.to_string |> List.of_seq |> String.concat "\n"
-    in
-
-    wfs ^ "\n" ^ ps
-
   let pp : t Fmt.t =
     let open Fmt.Dump in
+    let pp_part = Part.pp pp_z in
     record
       [
         field "workflows" workflows @@ list Workflow.pp;
-        field "parts" parts @@ seq Part.pp;
+        field "parts" parts @@ seq pp_part;
       ]
 end
 
-module Classifier = struct
-  module StringMap = Map.Make (String)
-
-  type t = Workflow.t StringMap.t
-
-  let from_workflows (workflows : Workflow.t Seq.t) : t =
-    workflows |> Seq.map (fun wf -> (Workflow.name wf, wf)) |> StringMap.of_seq
-
-  let get_workflow name (wfs : t) : Workflow.t =
-    match StringMap.find_opt name wfs with
-    | None ->
-        failwith @@ Fmt.str "no workflow with name=%a" Fmt.Dump.string name
-    | Some wf -> wf
-
-  let run_workflow wf part =
-    let rec loop = function
-      | [] ->
-          failwith
-          @@ Fmt.str "no matching rules in %a for %a" Fmt.Dump.string
-               (Workflow.name wf) Part.pp part
-      | rule :: rules ->
-          if Predicate.matches part (Rule.predicate rule) then Rule.result rule
-          else loop rules
-    in
-
-    loop (Workflow.rules wf)
-
-  let rec eval_workflow wf part wfs =
-    match run_workflow wf part with
-    | RuleResult.Resolved st -> st
-    | RuleResult.Pending next -> eval_workflow (get_workflow next wfs) part wfs
-
-  let classify (part : Part.t) (wfs : t) : PartStatus.t =
-    eval_workflow (get_workflow "in" wfs) part wfs
-end
+module StringMap = Map.Make (String)
 
 module Part1 = struct
+  type context = { wfs : Workflow.t StringMap.t; part : Z.t Part.t }
+
+  let get_workflow ctx name = StringMap.find name ctx.wfs
+
+  let cmp_of_op = function
+    | Operator.Lt -> Z.Compare.( < )
+    | Operator.Gt -> Z.Compare.( > )
+    | _ -> failwith "cmp_of_op"
+
+  let eval_cond ctx ({ op; lhs = field; rhs } : Expr.cond) =
+    (cmp_of_op op) (Part.get field ctx.part) rhs
+
+  let rec eval_expr ctx = function
+    | Expr.Return (RuleResult.Resolved st) -> st
+    | Expr.Return (RuleResult.Pending next_name) ->
+        next_name |> get_workflow ctx |> Workflow.rules |> eval_expr ctx
+    | Expr.If (cond, then_, else_) ->
+        if eval_cond ctx cond then eval_expr ctx then_ else eval_expr ctx else_
+
+  let classify_part wfs part =
+    let ctx = { wfs; part } in
+    let init = get_workflow ctx "in" in
+    eval_expr ctx (Workflow.rules init)
+
   let part_rating part =
     let open Z in
-    Category.all
-    |> List.fold_left (fun cur cat -> cur + ~$(Part.get cat part)) zero
+    Category.all |> List.fold_left (fun cur cat -> cur + Part.get cat part) zero
 
-  let run : Input.t -> Z.t =
-   fun input ->
-    let classifier =
-      input |> Input.workflows |> List.to_seq |> Classifier.from_workflows
+  let run (input : Input.t) : Z.t =
+    let wfs =
+      input
+      |> Input.workflows
+      |> List.to_seq
+      |> Seq.map (fun wf -> (Workflow.name wf, wf))
+      |> StringMap.of_seq
     in
-    let is_accepted part =
-      match Classifier.classify part classifier with
+
+    let part_is_valid part =
+      match classify_part wfs part with
       | PartStatus.Accepted -> true
       | PartStatus.Rejected -> false
     in
 
-    let accepted_parts = input |> Input.parts |> Seq.filter is_accepted in
+    input
+    |> Input.parts
+    |> Seq.filter part_is_valid
+    |> Seq.map part_rating
+    |> Seq.fold_left Z.add Z.zero
+end
 
-    accepted_parts |> Seq.map part_rating |> Seq.fold_left Z.add Z.zero
+module Range : sig
+  type t
+
+  val make : start:Z.t -> stop:Z.t -> t
+  val is_empty : t -> bool
+  val length : t -> Z.t
+  val mem : Z.t -> t -> bool [@@warning "-32"]
+  val clamp : Expr.cond -> t -> t
+  val pp : t Fmt.t [@@warning "-32"]
+end = struct
+  type span = { start : Z.t; stop : Z.t }
+  type t = Empty | Singleton of Z.t | Span of span
+
+  let make ~start ~stop =
+    let open Z.Compare in
+    if start >= stop then
+      Fmt.invalid_arg "make range [%a..%a]" pp_z start pp_z stop;
+    Span { start; stop }
+
+  let is_empty = function Empty -> true | _ -> false
+
+  let length = function
+    | Empty -> Z.zero
+    | Singleton _ -> Z.one
+    | Span { start; stop } -> Z.succ @@ Z.sub stop start
+
+  let mem x = function
+    | Empty -> false
+    | Singleton y -> Z.equal x y
+    | Span { start; stop } -> Z.Compare.(x >= start && x <= stop)
+
+  let with_min_incl x = function
+    | Empty -> Empty
+    | Singleton y ->
+        let open Z.Compare in
+        if x <= y then Singleton x else Empty
+    | Span { start; stop } ->
+        let open Z.Compare in
+        if x <= start then Span { start; stop }
+        else if x = stop then Singleton x
+        else if x > stop then Empty
+        else Span { start = x; stop }
+
+  let with_min_excl x = with_min_incl @@ Z.succ x
+
+  let with_max_incl x = function
+    | Empty -> Empty
+    | Singleton y ->
+        let open Z.Compare in
+        if x >= y then Singleton x else Empty
+    | Span { start; stop } ->
+        let open Z.Compare in
+        if x >= stop then Span { start; stop }
+        else if x = start then Singleton x
+        else if x < start then Empty
+        else Span { start; stop = x }
+
+  let with_max_excl x = with_max_incl @@ Z.pred x
+
+  let clamp : Expr.cond -> t -> t = function
+    | { op = Operator.Lt; rhs; _ } -> with_max_excl rhs
+    | { op = Operator.Le; rhs; _ } -> with_max_incl rhs
+    | { op = Operator.Gt; rhs; _ } -> with_min_excl rhs
+    | { op = Operator.Ge; rhs; _ } -> with_min_incl rhs
+
+  let pp ppf = function
+    | Empty -> Fmt.string ppf "[]"
+    | Singleton x -> Fmt.pf ppf "[%a]" pp_z x
+    | Span { start; stop } -> Fmt.pf ppf "[%a..%a]" pp_z start pp_z stop
 end
 
 module Part2 = struct
-  let run _ = failwith "unimplemented"
+  let inv_cond (cond : Expr.cond) = { cond with op = Operator.inv cond.op }
+  let ( ~! ) = inv_cond
+
+  type part_range = Range.t Part.t
+
+  let part_range_is_invalid (part_range : part_range) =
+    Category.all
+    |> List.exists (fun field -> Range.is_empty @@ Part.get field part_range)
+
+  let clamp_part_range (cond : Expr.cond) part_range =
+    let clamped = Range.clamp cond (Part.get cond.lhs part_range) in
+    Part.replace cond.lhs clamped part_range
+
+  type context = { wfs : Workflow.t StringMap.t; part_range : part_range }
+
+  let get_workflow ctx name = StringMap.find name ctx.wfs
+
+  let rec eval_expr ctx expr =
+    if part_range_is_invalid ctx.part_range then []
+    else
+      match expr with
+      | Expr.Return (RuleResult.Resolved PartStatus.Accepted) ->
+          [ ctx.part_range ]
+      | Expr.Return (RuleResult.Resolved PartStatus.Rejected) -> []
+      | Expr.Return (RuleResult.Pending next_name) ->
+          next_name |> get_workflow ctx |> Workflow.rules |> eval_expr ctx
+      | Expr.If (cond, then_, else_) ->
+          List.append
+            (eval_expr
+               { ctx with part_range = clamp_part_range cond ctx.part_range }
+               then_)
+            (eval_expr
+               { ctx with part_range = clamp_part_range ~!cond ctx.part_range }
+               else_)
+
+  let resolve_ranges wfs init_ranges =
+    let ctx = { wfs; part_range = init_ranges } in
+    let init_wf = get_workflow ctx "in" in
+    eval_expr ctx (Workflow.rules init_wf)
+
+  let default_range = Range.make ~start:Z.one ~stop:(Z.of_int 4000)
+
+  let default_ranges =
+    Part.make ~x:default_range ~m:default_range ~a:default_range
+      ~s:default_range
+
+  let part_range_count part_range =
+    Category.all
+    |> List.map (fun field -> Part.get field part_range)
+    |> List.map Range.length
+    |> List.fold_left Z.mul Z.one
+
+  let run (input : Input.t) : Z.t =
+    let wfs =
+      input
+      |> Input.workflows
+      |> List.to_seq
+      |> Seq.map (fun wf -> (Workflow.name wf, wf))
+      |> StringMap.of_seq
+    in
+
+    let valid_ranges = resolve_ranges wfs default_ranges in
+
+    valid_ranges |> List.map part_range_count |> List.fold_left Z.add Z.zero
 end

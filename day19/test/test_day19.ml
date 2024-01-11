@@ -26,7 +26,11 @@ let test_part1 () =
 
   Alcotest.(check z) "sum of ratings" expected actual
 
-let test_part2 () = Alcotest.skip ()
+let test_part2 () =
+  let expected = Z.of_string "167409079868000"
+  and actual = Day19.Part2.run (Day19.Input.of_string raw_input) in
+
+  Alcotest.(check z) "possible valid parts" expected actual
 
 let () =
   let open Alcotest in
