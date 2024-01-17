@@ -18,10 +18,6 @@
 (package
  (allow_empty)
  (name advent_of_code_2023)
- (synopsis "A short synopsis")
- (description "A longer description")
- (depends ocaml dune)
- (tags
-  (topics "to describe" your project)))
-
-; See the complete stanza docs at https://dune.readthedocs.io/en/stable/dune-files.html#dune-project
+ (synopsis "Advent of code 2023")
+ (description "Solutions to advent of code 2023")
+ (depends ocaml dune (fmt (>= 0.9.0)) (zarith (>= 1.12))))
