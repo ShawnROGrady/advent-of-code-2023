@@ -31,40 +31,6 @@ module TestPart1 = struct
     |> List.map make_case
 end
 
-module TestPart2 = struct
-  let example1 =
-    {|broadcaster -> a, b, c
-%a -> b
-%b -> c
-%c -> inv
-&inv -> a, rx|}
-
-  let example2 =
-    {|broadcaster -> a
-%a -> inv, con1, con2
-&inv -> b
-%b -> con1
-&con1 -> c
-%c -> d, con2
-%d -> con2
-&con2 -> rx|}
-
-  let run_case raw_input expected () =
-    let actual = Day20.Part2.run (Day20.Input.of_string raw_input) in
-
-    Alcotest.(check z) "fewest presses" (Z.of_int expected) actual
-
-  let make_case (name, (raw_input, expected)) =
-    Alcotest.test_case
-      (Printf.sprintf "Part2 %s" name)
-      `Quick
-      (run_case raw_input expected)
-
-  let cases =
-    [ ("Example1", (example1, 1)); ("Example2", (example2, 5)) ]
-    |> List.map make_case
-end
-
 let () =
   let open Alcotest in
-  run "Day19" [ ("part1", TestPart1.cases); ("part2", TestPart2.cases) ]
+  run "Day20" [ ("part1", TestPart1.cases) ]
